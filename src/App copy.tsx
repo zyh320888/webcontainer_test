@@ -1,8 +1,7 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { WebContainer } from "@webcontainer/api";
 import { Terminal, ExternalLink, RefreshCw } from "lucide-react";
 import StackBlitzSDK, { Project } from "@stackblitz/sdk";
-import { HostURL } from '@webcontainer/env';
 
 const files = {
   "index.js": {
@@ -11,41 +10,8 @@ const files = {
 import http from 'http';
 
 const server = http.createServer((req, res) => {
-  // 添加 CORS 头
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'X-Requested-With,content-type');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
-    return;
-  }
-
-  if (req.url === '/api') {
-    console.log(\`收到API请求: \${req.method} \${req.url}\`);
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ message: 'Hello from WebContainer API!' }));
-  } else {
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(\`
-      <!DOCTYPE html>
-      <html>
-        <body>
-          <h1>Hello from WebContainer!</h1>
-          <script>
-            window.addEventListener('message', async (event) => {
-              if (event.data === 'fetchApi') {
-                const response = await fetch('/api');
-                const data = await response.json();
-                event.source.postMessage({ type: 'apiResponse', data }, event.origin);
-              }
-            });
-          </script>
-        </body>
-      </html>
-    \`);
-  }
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Hello from WebContainer!');
 });
 
 server.listen(3000, () => {
@@ -74,8 +40,6 @@ function App() {
 
   const webContainerRef = useRef<boolean | null>(null);
   const [iframeKey, setIframeKey] = useState(0);
-  const [apiResponse, setApiResponse] = useState<string>("");
-  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // 添加这个新的辅助函数
   const cleanOutput = (data: string) => {
@@ -86,12 +50,12 @@ function App() {
     if (webContainerRef.current) {
       return; // 如果 WebContainer 已经启动，则直接返回
     }
+    console.log("startWebContainer");
     webContainerRef.current = true;
     async function startWebContainer() {
       setIsLoading(true);
       try {
         const webcontainerInstance = await WebContainer.boot();
-
         await webcontainerInstance.mount(files);
 
         const installProcess = await webcontainerInstance.spawn("npm", [
@@ -100,7 +64,7 @@ function App() {
         installProcess.output.pipeTo(
           new WritableStream({
             write(data) {
-              setOutput((prev) => prev + `\n${cleanOutput(data)}`);
+              setOutput((prev) => prev + cleanOutput(data));
             },
           })
         );
@@ -112,21 +76,20 @@ function App() {
         startProcess.output.pipeTo(
           new WritableStream({
             write(data) {
-              setOutput((prev) => prev + `\n${cleanOutput(data)}`);
+              setOutput((prev) => prev + cleanOutput(data));
             },
           })
         );
 
         webcontainerInstance.on("server-ready", (port, url) => {
           setWebContainerUrl(url);
-
           setOutput(
             (prev) => prev + `\n服务器已就绪，可通过以下地址访问：${url}`
           );
         });
       } catch (error) {
         console.error("Failed to start WebContainer:", error);
-        setOutput("启动 WebContainer 失败。请查看控制台以获取详细信息。");
+        setOutput("Failed to start WebContainer. Check console for details.");
       } finally {
         setIsLoading(false);
       }
@@ -152,26 +115,6 @@ function App() {
   const refreshIframe = () => {
     setIframeKey(prevKey => prevKey + 1);
   };
-
-  const fetchFromWebContainer = useCallback(() => {
-    if (!iframeRef.current || !iframeRef.current.contentWindow) {
-      setApiResponse("iframe 尚未准备好");
-      return;
-    }
-
-    iframeRef.current.contentWindow.postMessage('fetchApi', '*');
-  }, []);
-
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data && event.data.type === 'apiResponse') {
-        setApiResponse(JSON.stringify(event.data.data, null, 2));
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4">
@@ -208,7 +151,6 @@ function App() {
                   </button>
                 </div>
                 <iframe
-                  ref={iframeRef}
                   key={iframeKey}
                   src={webContainerUrl}
                   className="w-full h-64 border border-gray-300 rounded"
@@ -218,21 +160,6 @@ function App() {
             )}
           </>
         )}
-        
-        {/* 添加一个新的按钮和显示区域 */}
-        <div className="mt-4">
-          <button
-            onClick={fetchFromWebContainer}
-            className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
-          >
-            调用 WebContainer API
-          </button>
-          {apiResponse && (
-            <pre className="bg-gray-100 p-4 mt-2 rounded overflow-auto max-h-40">
-              {apiResponse}
-            </pre>
-          )}
-        </div>
       </div>
     </div>
   );
